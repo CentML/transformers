@@ -220,4 +220,4 @@ class GPTJOnnxConfig(OnnxConfigWithPast):
 
     @property
     def default_onnx_opset(self) -> int:
-        return 13
+        return 11
