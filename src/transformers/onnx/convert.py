@@ -162,13 +162,22 @@ def export_pytorch(
             config.patch_ops()
 
             # Determine the dynamic axes.
-            dynamic_axes={
+            dynamic_axes = {
                 name: axes for name, axes in chain(config.inputs.items(), config.outputs.items())
             }
+            static_axes = []
             if batch_size > 0:
-                del dynamic_axes['batch']
+                static_axes.append('batch')
             if seq_length > 0:
-                del dynamic_axes['sequence']
+                static_axes.append('sequence')
+            # Filter out static axes.
+            dynamic_axes = {
+                name: dict(filter(
+                    lambda axis_idx, axis_name: axis_name not in static_axes,
+                    axes.items(),
+                )) for name, axes in dynamic_axes.items()
+            }
+            dynamic_axes = dict(filter(lambda name, axes: len(axes) > 0, dynamic_axes.items()))
             # PyTorch deprecated the `enable_onnx_checker` and `use_external_data_format` arguments in v1.11,
             # so we check the torch version for backwards compatibility
             if parse(torch.__version__) < parse("1.10"):

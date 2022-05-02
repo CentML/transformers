@@ -181,6 +181,7 @@ class GPTJOnnxConfig(OnnxConfigWithPast):
         seq_length: int = -1,
         is_pair: bool = False,
         framework: Optional[TensorType] = None,
+        **kwargs,
     ) -> Mapping[str, Any]:
         common_inputs = super(OnnxConfigWithPast, self).generate_dummy_inputs(
             tokenizer, batch_size=batch_size, seq_length=seq_length, is_pair=is_pair, framework=framework

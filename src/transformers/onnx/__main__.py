@@ -138,7 +138,21 @@ def main():
     if args.atol is None:
         args.atol = onnx_config.atol_for_validation
 
-    validate_model_outputs(onnx_config, preprocessor, model, args.output, onnx_outputs, args.atol)
+    validate_model_outputs(
+        onnx_config,
+        preprocessor,
+        model,
+        args.output,
+        onnx_outputs,
+        args.atol,
+        batch_size=args.batch_size,
+        seq_length=args.seq_length,
+        num_choices=args.num_choices,
+        is_pair=args.is_pair,
+        num_channels=args.num_channels,
+        image_width=args.image_width,
+        image_height=args.image_height,
+    )
     logger.info(f"All good, model saved at: {args.output.as_posix()}")
 
 
