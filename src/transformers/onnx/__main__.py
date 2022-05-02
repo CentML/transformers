@@ -43,6 +43,48 @@ def main():
     )
     parser.add_argument("output", type=Path, help="Path indicating where to store generated ONNX model.")
     parser.add_argument("--cache_dir", type=str, default=None, help="Path indicating where to store cache.")
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=-1,
+        help="The batch size to export the model for (-1 means dynamic axis).",
+    )
+    parser.add_argument(
+        "--seq_length",
+        type=int,
+        default=-1,
+        help="The sequence length to export the model for (-1 means dynamic axis).",
+    )
+    parser.add_argument(
+        "--num_choices",
+        type=int,
+        default=-1,
+        help="The number of candidate answers provided for multiple choice task (-1 means dynamic axis).",
+    )
+    parser.add_argument(
+        "--is_pair",
+        default=False,
+        action="store_true",
+        help="Indicate if the input is a pair (sentence 1, sentence 2)",
+    )
+    parser.add_argument(
+        "--num_channels",
+        type=int,
+        default=3,
+        help="The number of channels of the generated images.",
+    )
+    parser.add_argument(
+        "--image_width",
+        type=int,
+        default=40,
+        help="The width of the generated images.",
+    )
+    parser.add_argument(
+        "--image_height",
+        type=int,
+        default=40,
+        help="The height of the generated images.",
+    )
 
     # Retrieve CLI arguments
     args = parser.parse_args()
@@ -84,6 +126,13 @@ def main():
         onnx_config,
         args.opset,
         args.output,
+        batch_size=args.batch_size,
+        seq_length=args.seq_length,
+        num_choices=args.num_choices,
+        is_pair=args.is_pair,
+        num_channels=args.num_channels,
+        image_width=args.image_width,
+        image_height=args.image_height,
     )
 
     if args.atol is None:

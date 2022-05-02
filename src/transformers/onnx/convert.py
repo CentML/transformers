@@ -86,6 +86,13 @@ def export_pytorch(
     opset: int,
     output: Path,
     tokenizer: "PreTrainedTokenizer" = None,
+    batch_size: int = -1,
+    seq_length: int = -1,
+    num_choices: int = -1,
+    is_pair: bool = False,
+    num_channels: int = 3,
+    image_width: int = 40,
+    image_height: int = 40,
 ) -> Tuple[List[str], List[str]]:
     """
     Export a PyTorch model to an ONNX Intermediate Representation (IR)
@@ -135,7 +142,17 @@ def export_pytorch(
 
             # Ensure inputs match
             # TODO: Check when exporting QA we provide "is_pair=True"
-            model_inputs = config.generate_dummy_inputs(preprocessor, framework=TensorType.PYTORCH)
+            model_inputs = config.generate_dummy_inputs(
+                preprocessor,
+                batch_size=batch_size,
+                seq_length=seq_length,
+                num_choices=num_choices,
+                is_pair=is_pair,
+                framework=TensorType.PYTORCH,
+                num_channels=num_channels,
+                image_width=image_width,
+                image_height=image_height,
+            )
             inputs_match, matched_inputs = ensure_model_and_config_inputs_match(model, model_inputs.keys())
             onnx_outputs = list(config.outputs.keys())
 
@@ -144,6 +161,14 @@ def export_pytorch(
 
             config.patch_ops()
 
+            # Determine the dynamic axes.
+            dynamic_axes={
+                name: axes for name, axes in chain(config.inputs.items(), config.outputs.items())
+            }
+            if batch_size > 0:
+                del dynamic_axes['batch']
+            if seq_length > 0:
+                del dynamic_axes['sequence']
             # PyTorch deprecated the `enable_onnx_checker` and `use_external_data_format` arguments in v1.11,
             # so we check the torch version for backwards compatibility
             if parse(torch.__version__) < parse("1.10"):
@@ -156,9 +181,7 @@ def export_pytorch(
                         f=output.as_posix(),
                         input_names=list(config.inputs.keys()),
                         output_names=onnx_outputs,
-                        dynamic_axes={
-                            name: axes for name, axes in chain(config.inputs.items(), config.outputs.items())
-                        },
+                        dynamic_axes=dynamic_axes,
                         do_constant_folding=True,
                         use_external_data_format=config.use_external_data_format(model.num_parameters()),
                         enable_onnx_checker=True,
@@ -181,7 +204,7 @@ def export_pytorch(
                     f=output.as_posix(),
                     input_names=list(config.inputs.keys()),
                     output_names=onnx_outputs,
-                    dynamic_axes={name: axes for name, axes in chain(config.inputs.items(), config.outputs.items())},
+                    dynamic_axes=dynamic_axes,
                     do_constant_folding=True,
                     opset_version=opset,
                 )
@@ -198,6 +221,13 @@ def export_tensorflow(
     opset: int,
     output: Path,
     tokenizer: "PreTrainedTokenizer" = None,
+    batch_size: int = -1,
+    seq_length: int = -1,
+    num_choices: int = -1,
+    is_pair: bool = False,
+    num_channels: int = 3,
+    image_width: int = 40,
+    image_height: int = 40,
 ) -> Tuple[List[str], List[str]]:
     """
     Export a TensorFlow model to an ONNX Intermediate Representation (IR)
@@ -243,7 +273,17 @@ def export_tensorflow(
             setattr(model.config, override_config_key, override_config_value)
 
     # Ensure inputs match
-    model_inputs = config.generate_dummy_inputs(preprocessor, framework=TensorType.TENSORFLOW)
+    model_inputs = config.generate_dummy_inputs(
+        preprocessor,
+        batch_size=batch_size,
+        seq_length=seq_length,
+        num_choices=num_choices,
+        is_pair=is_pair,
+        framework=TensorType.TENSORFLOW,
+        num_channels=num_channels,
+        image_width=image_width,
+        image_height=image_height,
+    )
     inputs_match, matched_inputs = ensure_model_and_config_inputs_match(model, model_inputs.keys())
     onnx_outputs = list(config.outputs.keys())
 
@@ -262,6 +302,13 @@ def export(
     opset: int,
     output: Path,
     tokenizer: "PreTrainedTokenizer" = None,
+    batch_size: int = -1,
+    seq_length: int = -1,
+    num_choices: int = -1,
+    is_pair: bool = False,
+    num_channels: int = 3,
+    image_width: int = 40,
+    image_height: int = 40,
 ) -> Tuple[List[str], List[str]]:
     """
     Export a Pytorch or TensorFlow model to an ONNX Intermediate Representation (IR)
@@ -310,9 +357,37 @@ def export(
             )
 
     if is_torch_available() and issubclass(type(model), PreTrainedModel):
-        return export_pytorch(preprocessor, model, config, opset, output, tokenizer=tokenizer)
+        return export_pytorch(
+            preprocessor,
+            model,
+            config,
+            opset,
+            output,
+            tokenizer=tokenizer,
+            batch_size=batch_size,
+            seq_length=seq_length,
+            num_choices=num_choices,
+            is_pair=is_pair,
+            num_channels=num_channels,
+            image_width=image_width,
+            image_height=image_height,
+        )
     elif is_tf_available() and issubclass(type(model), TFPreTrainedModel):
-        return export_tensorflow(preprocessor, model, config, opset, output, tokenizer=tokenizer)
+        return export_tensorflow(
+            preprocessor,
+            model,
+            config,
+            opset,
+            output,
+            tokenizer=tokenizer,
+            batch_size=batch_size,
+            seq_length=seq_length,
+            num_choices=num_choices,
+            is_pair=is_pair,
+            num_channels=num_channels,
+            image_width=image_width,
+            image_height=image_height,
+        )
 
 
 def validate_model_outputs(
@@ -323,6 +398,13 @@ def validate_model_outputs(
     onnx_named_outputs: List[str],
     atol: float,
     tokenizer: "PreTrainedTokenizer" = None,
+    batch_size: int = -1,
+    seq_length: int = -1,
+    num_choices: int = -1,
+    is_pair: bool = False,
+    num_channels: int = 3,
+    image_width: int = 40,
+    image_height: int = 40,
 ):
     from onnxruntime import InferenceSession, SessionOptions
 
@@ -341,9 +423,29 @@ def validate_model_outputs(
     # TODO: generate inputs with a different batch_size and seq_len that was used for conversion to properly test
     # dynamic input shapes.
     if is_torch_available() and issubclass(type(reference_model), PreTrainedModel):
-        reference_model_inputs = config.generate_dummy_inputs(preprocessor, framework=TensorType.PYTORCH)
+        reference_model_inputs = config.generate_dummy_inputs(
+            preprocessor,
+            batch_size=batch_size,
+            seq_length=seq_length,
+            num_choices=num_choices,
+            is_pair=is_pair,
+            framework=TensorType.PYTORCH,
+            num_channels=num_channels,
+            image_width=image_width,
+            image_height=image_height,
+        )
     else:
-        reference_model_inputs = config.generate_dummy_inputs(preprocessor, framework=TensorType.TENSORFLOW)
+        reference_model_inputs = config.generate_dummy_inputs(
+            preprocessor,
+            batch_size=batch_size,
+            seq_length=seq_length,
+            num_choices=num_choices,
+            is_pair=is_pair,
+            framework=TensorType.TENSORFLOW,
+            num_channels=num_channels,
+            image_width=image_width,
+            image_height=image_height,
+        )
 
     # Create ONNX Runtime session
     options = SessionOptions()
