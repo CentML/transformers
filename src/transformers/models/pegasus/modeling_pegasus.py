@@ -1140,6 +1140,11 @@ class PegasusModel(PegasusPreTrainedModel):
         self.encoder = PegasusEncoder(config, self.shared)
         self.decoder = PegasusDecoder(config, self.shared)
 
+        import os
+        if os.getenv('CENTML_OPT_PEGASUS') is not None and os.getenv('CENTML_OPT_PEGASUS') != '0':
+            self.encoder = self.encoder.bfloat16()
+            self.decoder = self.decoder.bfloat16()
+
         # Initialize weights and apply final processing
         self.post_init()
 

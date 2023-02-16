@@ -1483,6 +1483,12 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
+        import os
+        if os.getenv('CENTML_OPT_T5') is not None and os.getenv('CENTML_OPT_T5') != '0':
+            self.encoder = self.encoder.bfloat16()
+            self.decoder = self.decoder.bfloat16()
+            self.lm_head = self.lm_head.bfloat16()
+
         # Initialize weights and apply final processing
         self.post_init()
 
