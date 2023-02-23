@@ -1141,10 +1141,6 @@ class PegasusModel(PegasusPreTrainedModel):
         self.encoder = PegasusEncoder(config, self.shared)
         self.decoder = PegasusDecoder(config, self.shared)
 
-        if int(os.getenv('CENTML_OPT_PEGASUS', '0')) > 0:
-            self.encoder = self.encoder.bfloat16()
-            self.decoder = self.decoder.bfloat16()
-
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1302,6 +1298,10 @@ class PegasusForConditionalGeneration(PegasusPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+        if int(os.getenv('CENTML_OPT_PEGASUS', '0')) > 0:
+            self.model.encoder = self.model.encoder.eval().bfloat16().cuda()
+            self.model.decoder = self.model.decoder.eval().bfloat16().cuda()
 
     def get_encoder(self):
         return self.model.get_encoder()

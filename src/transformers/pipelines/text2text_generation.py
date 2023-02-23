@@ -1,4 +1,5 @@
 import enum
+import os
 
 from ..tokenization_utils import TruncationStrategy
 from ..utils import add_end_docstrings, is_tf_available, is_torch_available, logging
@@ -99,6 +100,10 @@ class Text2TextGenerationPipeline(Pipeline):
             raise ValueError(
                 f" `args[0]`: {args[0]} have the wrong format. The should be either of type `str` or type `list`"
             )
+
+        if int(os.getenv('CENTML_OPT_PEGASUS', '0')) > 1:
+            padding = 'max_length'
+
         inputs = self.tokenizer(*args, padding=padding, truncation=truncation, return_tensors=self.framework)
         # This is produced by tokenizers but is an invalid generate kwargs
         if "token_type_ids" in inputs:
