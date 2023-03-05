@@ -102,9 +102,10 @@ class Text2TextGenerationPipeline(Pipeline):
             )
 
         if int(os.getenv('CENTML_OPT_PEGASUS', '0')) > 1:
-            padding = 'max_length'
+            inputs = self.tokenizer(*args, padding='max_length', truncation=truncation, return_tensors=self.framework, max_length=1024)
+        else:
+            inputs = self.tokenizer(*args, padding=padding, truncation=truncation, return_tensors=self.framework)
 
-        inputs = self.tokenizer(*args, padding=padding, truncation=truncation, return_tensors=self.framework)
         # This is produced by tokenizers but is an invalid generate kwargs
         if "token_type_ids" in inputs:
             del inputs["token_type_ids"]

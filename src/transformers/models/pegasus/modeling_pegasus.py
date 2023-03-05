@@ -44,6 +44,7 @@ from ...utils import (
 )
 from .configuration_pegasus import PegasusConfig
 
+from torch.cuda.graphs_ext import make_dynamic_graphed_callable, MempoolType
 
 logger = logging.get_logger(__name__)
 
@@ -1276,6 +1277,178 @@ class PegasusModel(PegasusPreTrainedModel):
             encoder_attentions=encoder_outputs.attentions,
         )
 
+class MockEncoderModule1(nn.Module):
+    def __init__(self, model):
+        super(MockEncoderModule1, self).__init__()
+        self._model = model
+
+    @torch.no_grad()
+    def forward(self, attention_mask, input_ids):
+        res = self._model.forward(attention_mask=attention_mask, input_ids=input_ids, output_attentions=False, output_hidden_states=False, return_dict=True)
+        return res
+
+class MockEncoderModule2(nn.Module):
+    def __init__(self, model):
+        super(MockEncoderModule2, self).__init__()
+        self._model = MockEncoderModule1(model)
+        self._last_hidden_state = None
+
+        def args_generator(batch_size, module_idx):
+            return torch.tensor(np.random.randint(0, 2, (batch_size, 1024))).cuda(), torch.tensor(np.random.randint(0, 49163, (batch_size, 1024))).cuda()
+
+        self._graph = make_dynamic_graphed_callable(
+                self._model,
+                args_generator,
+                list(range(1, 9)),
+                mempool_type=MempoolType.kTape,
+                debug_mode=False,
+                compress_metadata=False)
+
+    @torch.no_grad()
+    def forward(self, *args, **kwargs):
+        batch_size = kwargs['input_ids'].shape[0]
+        seq_len = kwargs['input_ids'].shape[1]
+        self._graph.configure(batch_size)
+        res = self._graph(kwargs['attention_mask'], kwargs['input_ids'])
+        if self._last_hidden_state is None:
+            self._last_hidden_state = res.last_hidden_state
+        else:
+            res.last_hidden_state = self._last_hidden_state
+        return res
+
+class MockDecoderModule1(nn.Module):
+    def __init__(self, model):
+        super(MockDecoderModule1, self).__init__()
+        self._model = model
+
+    @torch.no_grad()
+    def forward(self, *args):
+        input_ids = args[0]
+        encoder_hidden_states = args[1]
+        encoder_attention_mask = args[2]
+        past_key_values = args[3]
+        if args[3] is None:
+            past_key_values = None
+        else:
+            count = 3
+            past_key_values = []
+            for i in range(16):
+                past_key_values.append((args[count], args[count+1], args[count+2], args[count+3]))
+                count += 4
+
+            past_key_values = tuple(past_key_values)
+
+        return self._model.forward(input_ids=input_ids, encoder_hidden_states=encoder_hidden_states, encoder_attention_mask=encoder_attention_mask, past_key_values=past_key_values, use_cache=True, output_attentions=False, output_hidden_states=False, return_dict=True)
+
+class MockDecoderModule2(nn.Module):
+    def __init__(self, model, num_beams, batch_size, max_length):
+        super(MockDecoderModule2, self).__init__()
+        self._model = MockDecoderModule1(model)
+        self._num_beams = num_beams
+        self._batch_size = batch_size
+        self._max_length = max_length
+
+        def args_generator(seq_len, module_idx):
+            tmp_1 = torch.tensor(np.random.randint(0, 49163, (self._num_beams * self._batch_size, 1))).cuda()
+            tmp_2 = torch.randn(self._num_beams * self._batch_size, 1024, 1024, dtype=torch.float32).bfloat16().cuda()
+            tmp_3 = torch.tensor(np.random.randint(0, 49163, (self._num_beams * self._batch_size, 1024))).cuda()
+            tmp_4 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_5 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_6 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_7 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_8 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_9 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_10 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_11 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_12 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_13 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_14 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_15 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_16 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_17 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_18 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_19 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_20 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_21 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_22 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_23 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_24 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_25 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_26 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_27 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_28 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_29 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_30 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_31 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_32 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_33 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_34 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_35 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_36 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_37 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_38 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_39 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_40 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_41 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_42 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_43 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_44 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_45 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_46 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_47 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_48 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_49 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_50 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_51 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_52 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_53 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_54 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_55 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_56 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_57 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_58 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_59 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_60 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_61 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_62 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_63 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_64 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_65 = torch.randn(self._num_beams * self._batch_size, 16, seq_len, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_66 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+            tmp_67 = torch.randn(self._num_beams * self._batch_size, 16, 1024, 64, dtype=torch.float32).bfloat16().cuda()
+
+            return (tmp_1,tmp_2,tmp_3,tmp_4,tmp_5,tmp_6,tmp_7,tmp_8,tmp_9,tmp_10,tmp_11,tmp_12,tmp_13,tmp_14,tmp_15,tmp_16,tmp_17,tmp_18,tmp_19,tmp_20,tmp_21,tmp_22,tmp_23,tmp_24,tmp_25,tmp_26,tmp_27,tmp_28,tmp_29,tmp_30,tmp_31,tmp_32,tmp_33,tmp_34,tmp_35,tmp_36,tmp_37,tmp_38,tmp_39,tmp_40,tmp_41,tmp_42,tmp_43,tmp_44,tmp_45,tmp_46,tmp_47,tmp_48,tmp_49,tmp_50,tmp_51,tmp_52,tmp_53,tmp_54,tmp_55,tmp_56,tmp_57,tmp_58,tmp_59,tmp_60,tmp_61,tmp_62,tmp_63,tmp_64,tmp_65,tmp_66,tmp_67)
+
+        self._graph = make_dynamic_graphed_callable(
+                self._model,
+                args_generator,
+                list(range(1, self._max_length + 1)),
+                mempool_type=MempoolType.kTape,
+                debug_mode=False,
+                compress_metadata=False)
+
+    @torch.no_grad()
+    def forward(self, *args, **kwargs):
+        args = []
+        args.append(kwargs['input_ids'])
+        args.append(kwargs['encoder_hidden_states'])
+        args.append(kwargs['encoder_attention_mask'])
+        if kwargs['past_key_values'] is not None:
+            count = 0
+            for pkvs in kwargs['past_key_values']:
+                for pkv in pkvs:
+                    args.append(pkv)
+        else:
+            args.append(None)
+
+        if kwargs['past_key_values'] is None or self._batch_size != (kwargs['past_key_values'][0][0].shape[0] // self._num_beams):
+            res = self._model(*args)
+        else:
+            seq_len = kwargs['past_key_values'][0][0].shape[2]
+            self._graph.configure(seq_len)
+            res = self._graph(*args)
+
+        return res
 
 @add_start_docstrings(
     "The PEGASUS Model with a language modeling head. Can be used for summarization.", PEGASUS_START_DOCSTRING
@@ -1295,13 +1468,21 @@ class PegasusForConditionalGeneration(PegasusPreTrainedModel):
         self.model = PegasusModel(config)
         self.register_buffer("final_logits_bias", torch.zeros((1, self.model.shared.num_embeddings)))
         self.lm_head = nn.Linear(config.d_model, self.model.shared.num_embeddings, bias=False)
+        self._config = config
 
         # Initialize weights and apply final processing
         self.post_init()
 
+    def init(self, batch_size):
         if int(os.getenv('CENTML_OPT_PEGASUS', '0')) > 0:
             self.model.encoder = self.model.encoder.eval().bfloat16().cuda()
             self.model.decoder = self.model.decoder.eval().bfloat16().cuda()
+
+        if int(os.getenv('CENTML_OPT_PEGASUS', '0')) > 1:
+            mock_encoder = MockEncoderModule2(self.model.encoder)
+            self.model.encoder = mock_encoder
+            mock_decoder = MockDecoderModule2(self.model.decoder, self._config.num_beams, batch_size, self._config.max_length)
+            self.model.decoder = mock_decoder
 
     def get_encoder(self):
         return self.model.get_encoder()
