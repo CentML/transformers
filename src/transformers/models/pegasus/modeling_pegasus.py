@@ -26,6 +26,11 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
+import os
+from torch.cuda.graphs_ext import inline_module_args, G_CUDA_GRAPH_MODULE_ARGS_CACHE
+
+G_DECODER_LAYER_IDX = None
+
 from ...activations import ACT2FN
 from ...modeling_outputs import (
     BaseModelOutput,
@@ -173,8 +178,19 @@ class PegasusAttention(nn.Module):
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
 
-    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
-        return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int, dst_module_arg_idx=None):
+        seq_len = tensor.numel() // bsz // self.num_heads // self.head_dim
+        if dst_module_arg_idx is None or (seq_len,) not in G_CUDA_GRAPH_MODULE_ARGS_CACHE:
+            if dst_module_arg_idx is not None:
+                print(
+                    f"Unable to inline the past_key_values because seq_len={seq_len}"
+                    " does not yet exist in G_CUDA_GRAPH_MODULE_ARGS_CACHE"
+                )
+            return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+
+        dst_module_arg = G_CUDA_GRAPH_MODULE_ARGS_CACHE[(seq_len,)][dst_module_arg_idx]
+        dst_module_arg[:, :, :, :] = tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        return dst_module_arg
 
     def forward(
         self,
@@ -202,8 +218,24 @@ class PegasusAttention(nn.Module):
             value_states = past_key_value[1]
         elif is_cross_attention:
             # cross_attentions
-            key_states = self._shape(self.k_proj(key_value_states), -1, bsz)
-            value_states = self._shape(self.v_proj(key_value_states), -1, bsz)
+            k_proj_kv_states = self.k_proj(key_value_states)
+            key_states = self._shape(
+                k_proj_kv_states,
+                -1,
+                bsz,
+                # <bojian/DynamicCUDAGraph>
+                # 3 is for input_ids, encoder_hidden_state,
+                #          encoder_attention_mask
+                (3 + G_DECODER_LAYER_IDX * 4 + 2) if inline_module_args() else None,
+            )
+            v_proj_kv_states = self.v_proj(key_value_states)
+            value_states = self._shape(
+                v_proj_kv_states,
+                -1,
+                bsz,
+                # <bojian/DynamicCUDAGraph>
+                (3 + G_DECODER_LAYER_IDX * 4 + 3) if inline_module_args() else None,
+            )
         elif past_key_value is not None:
             # reuse k, v, self_attention
             key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
@@ -1046,6 +1078,10 @@ class PegasusDecoder(PegasusPreTrainedModel):
                     len(self.layers)
                 ), f"The `{mask_name}` should be specified for {len(self.layers)} layers, but it is for {head_mask.size()[0]}."
         for idx, decoder_layer in enumerate(self.layers):
+            if inline_module_args():
+                global G_DECODER_LAYER_IDX
+                G_DECODER_LAYER_IDX = idx
+
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -1419,6 +1455,7 @@ class MockDecoderModule2(nn.Module):
 
             return (tmp_1,tmp_2,tmp_3,tmp_4,tmp_5,tmp_6,tmp_7,tmp_8,tmp_9,tmp_10,tmp_11,tmp_12,tmp_13,tmp_14,tmp_15,tmp_16,tmp_17,tmp_18,tmp_19,tmp_20,tmp_21,tmp_22,tmp_23,tmp_24,tmp_25,tmp_26,tmp_27,tmp_28,tmp_29,tmp_30,tmp_31,tmp_32,tmp_33,tmp_34,tmp_35,tmp_36,tmp_37,tmp_38,tmp_39,tmp_40,tmp_41,tmp_42,tmp_43,tmp_44,tmp_45,tmp_46,tmp_47,tmp_48,tmp_49,tmp_50,tmp_51,tmp_52,tmp_53,tmp_54,tmp_55,tmp_56,tmp_57,tmp_58,tmp_59,tmp_60,tmp_61,tmp_62,tmp_63,tmp_64,tmp_65,tmp_66,tmp_67)
 
+        inline_module_args(True)
         self._graph = make_dynamic_graphed_callable(
                 self._model,
                 args_generator,
@@ -1426,6 +1463,7 @@ class MockDecoderModule2(nn.Module):
                 mempool_type=MempoolType.kTape,
                 debug_mode=False,
                 compress_metadata=False)
+        inline_module_args(False)
 
     @torch.no_grad()
     def forward(self, *args, **kwargs):
@@ -1649,13 +1687,27 @@ class PegasusForConditionalGeneration(PegasusPreTrainedModel):
     @staticmethod
     def _reorder_cache(past, beam_idx):
         reordered_past = ()
-        for layer_past in past:
-            # cached cross_attention states don't have to be reordered -> they are always the same
-            reordered_past += (
-                tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
-            )
+        if int(os.getenv("CENTML_OPT_PEGASUS", "0")) > 1:
+            seq_len = past[0][0].shape[2]
+            for layer_idx, layer_past in enumerate(past):
+                dst_module_args = G_CUDA_GRAPH_MODULE_ARGS_CACHE[(seq_len,)]
+                torch.index_select(layer_past[0], 0, beam_idx, out=dst_module_args[3 + layer_idx * 4])
+                torch.index_select(layer_past[1], 0, beam_idx, out=dst_module_args[3 + layer_idx * 4 + 1])
+                reordered_past += (
+                    (
+                        dst_module_args[3 + layer_idx * 4],
+                        dst_module_args[3 + layer_idx * 4 + 1],
+                        layer_past[2],
+                        layer_past[3],
+                    ),
+                )
+        else:
+            for layer_past in past:
+                # cached cross_attention states don't have to be reordered -> they are always the same
+                reordered_past += (
+                    tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
+                )
         return reordered_past
-
 
 # Copied from transformers.models.bart.modeling_bart.BartDecoderWrapper with Bart->Pegasus
 class PegasusDecoderWrapper(PegasusPreTrainedModel):

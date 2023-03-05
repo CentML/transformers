@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import inspect
 import warnings
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 from torch import nn
+from torch.cuda.graphs_ext import G_CUDA_GRAPH_MODULE_ARGS_CACHE
 
 from .generation_beam_constraints import Constraint, DisjunctiveConstraint, PhrasalConstraint
 from .generation_beam_search import BeamScorer, BeamSearchScorer, ConstrainedBeamSearchScorer
@@ -589,9 +591,17 @@ class GenerationMixin:
         if is_encoder_decoder:
             if encoder_outputs is None:
                 raise ValueError("If `is_encoder_decoder` is True, make sure that `encoder_outputs` is defined.")
-            encoder_outputs["last_hidden_state"] = encoder_outputs.last_hidden_state.index_select(
-                0, expanded_return_idx.to(encoder_outputs.last_hidden_state.device)
-            )
+            if int(os.getenv("CENTML_OPT_PEGASUS", "0")) > 1:
+                dst_module_arg = G_CUDA_GRAPH_MODULE_ARGS_CACHE[(1,)][1]
+                torch.index_select(
+                    encoder_outputs.last_hidden_state,
+                    0, expanded_return_idx.to(encoder_outputs.last_hidden_state.device), out=dst_module_arg
+                )
+                encoder_outputs["last_hidden_state"] = dst_module_arg
+            else:
+                encoder_outputs["last_hidden_state"] = encoder_outputs.last_hidden_state.index_select(
+                    0, expanded_return_idx.to(encoder_outputs.last_hidden_state.device)
+                )
             model_kwargs["encoder_outputs"] = encoder_outputs
         return input_ids, model_kwargs
 
